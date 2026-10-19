@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import UserProfile, DoseSchedule, DoseRecord
+from .models import UserProfile, PatientDose, Patients
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -115,90 +115,26 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 
-class DoseRecordSerializer(serializers.ModelSerializer):
-    medication_name = serializers.CharField(
-        source="dose_schedule.medication_name",
-        read_only=True,
-    )
-    dosage = serializers.CharField(
-        source="dose_schedule.dosage",
-        read_only=True,
-    )
+class PatientDoseSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
 
-    class Meta:
-        model = DoseRecord
-        fields = [
-            "id",
-            "dose_schedule",
-            "patient_name",
-            "medication_name",
-            "dosage",
-            "scheduled_at",
-            "status",
-            "taken_at",
-            "notes",
-            "created_at",
-        ]
-        read_only_fields = [
-            "id",
-            "patient_name",
-            "medication_name",
-            "dosage",
-            "created_at",
-        ]
-
-    def get_patient_name(self, obj):
-        user = obj.dose_schedule.user
-        return user.get_full_name() or user.username
-
-
-class DoseScheduleSerializer(serializers.ModelSerializer):
-    patient_name = serializers.SerializerMethodField()
-    dose_records = DoseRecordSerializer(many=True, read_only=True)
-
-    doses_taken = serializers.SerializerMethodField()
-    upcoming_doses = serializers.SerializerMethodField()
-    missed_doses = serializers.SerializerMethodField()
+    patient = serializers.PrimaryKeyRelatedField(
+        queryset=Patients.objects.select_related("user").all()
+    )
 
     class Meta:
-        model = DoseSchedule
+        model = PatientDose
         fields = [
             "id",
-            "user",
+            "patient",
             "patient_name",
-            "medication_name",
-            "dosage",
-            "frequency",
-            "start_date",
-            "end_date",
-            "scheduled_time",
-            "total_doses",
+            "medicine_name",
+            "details",
+            "time",
             "status",
-            "created_at",
-            "dose_records",
-            "doses_taken",
-            "upcoming_doses",
-            "missed_doses",
+            "quantity",
         ]
-        read_only_fields = [
-            "id",
-            "patient_name",
-            "created_at",
-            "dose_records",
-            "doses_taken",
-            "upcoming_doses",
-            "missed_doses",
-        ]
+        read_only_fields = ["id", "patient_name"]
 
     def get_patient_name(self, obj):
-        return obj.user.get_full_name() or obj.user.username
-
-    def get_doses_taken(self, obj):
-        return obj.dose_records.filter(status="Taken").count()
-
-    def get_upcoming_doses(self, obj):
-        return obj.dose_records.filter(status="Upcoming").count()
-
-    def get_missed_doses(self, obj):
-        return obj.dose_records.filter(status="Missed").count()
+        return obj.patient.user.get_full_name() or obj.patient.user.username

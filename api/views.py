@@ -8,10 +8,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 
-from .models import UserProfile
+from .models import UserProfile, PatientDose
 from .serializers import (
     UserProfileSerializer,
-    RegisterSerializer,
+    RegisterSerializer, PatientDoseSerializer
 )
 
 
@@ -94,10 +94,49 @@ class LoginView(APIView):
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get_object(self):
         profile, _ = UserProfile.objects.get_or_create(
             user=self.request.user
         )
         return profile
+
+
+class PatientListView(generics.ListAPIView):
+    serializer_class = UserProfileSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return UserProfile.objects.filter(
+            user__is_superuser=False,
+            user__is_staff=False,
+        ).select_related("user").order_by("id")
+        
+        
+
+class PatientDoseListCreateView(generics.ListCreateAPIView):
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = PatientDose.objects.select_related(
+            "patient",
+            "patient__user",
+        ).order_by("-id")
+
+        patient_id = self.request.query_params.get("patient")
+
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+
+        return queryset
+
+
+class PatientDoseDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = PatientDose.objects.select_related(
+        "patient",
+        "patient__user",
+    ).all()
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
