@@ -1,49 +1,103 @@
-# views.py
 
-import re
-import pytesseract
-from PIL import Image
-from rest_framework.decorators import api_view
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
+
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.authtoken.models import Token
+
+from .models import UserProfile
+from .serializers import (
+    UserProfileSerializer,
+    RegisterSerializer,
+)
 
 
-@api_view(["POST"])
-def scan_school_id(request):
-    image = request.FILES.get("image")
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework.exceptions import AuthenticationFailed
 
-    if not image:
-        return Response(
-            {"error": "No image provided."},
-            status=400
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        if not self.user.is_superuser:
+            raise AuthenticationFailed(
+                "Access denied. Only administrators can log in."
+            )
+
+        data["user"] = {
+            "id": self.user.id,
+            "username": self.user.username,
+            "email": self.user.email,
+            "is_superuser": self.user.is_superuser,
+        }
+
+        return data
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
+
+class RegisterView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
+
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = request.data.get("username")
+        password = request.data.get("password")
+
+        if not username or not password:
+            return Response(
+                {"error": "Username and password are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = authenticate(
+            request,
+            username=username,
+            password=password
         )
 
-    try:
-        img = Image.open(image)
+        if user is None:
+            return Response(
+                {"error": "Invalid username or password."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
-        text = pytesseract.image_to_string(img)
+        token, created = Token.objects.get_or_create(user=user)
 
-        print("OCR TEXT:")
-        print(text)
-
-        # Example ID formats:
-        # 2024-12345
-        # 2025-123456
-        # 24-12345
-        id_match = re.search(
-            r"\b(?:20\d{2}[-\s]?\d{4,6}|\d{2}[-\s]?\d{4,6})\b",
-            text
-        )
-
-        school_id = id_match.group(0) if id_match else ""
+        profile, _ = UserProfile.objects.get_or_create(user=user)
 
         return Response({
-            "success": True,
-            "text": text,
-            "school_id": school_id,
+            "message": "Login successful.",
+            "token": token.key,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+            "profile": UserProfileSerializer(profile).data,
         })
 
-    except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=500
+
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=self.request.user
         )
+        return profile
