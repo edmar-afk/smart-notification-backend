@@ -14,4 +14,10 @@ urlpatterns = [
     path("patients/",views.PatientListView.as_view(),name="patient-list",),
     path("patient-doses/",views.PatientDoseListCreateView.as_view(),name="patient-dose-list-create",),
     path("patient-doses/<int:pk>/",views.PatientDoseDetailView.as_view(),name="patient-dose-detail",),
+    path("patient-doses/user/<int:user_id>/",views.PatientDoseListView.as_view(),name="patient-dose-list",),
+    
+    path("reminders/", views.StudentReminderView.as_view(),name="student-reminders",),
+    
+    path("patient-dose-history/", views.PatientDoseHistoryListCreateView.as_view(), name="patient-dose-history-list-create",),
+    path("patient-dose-history/<int:pk>/", views.PatientDoseHistoryDetailView.as_view(), name="patient-dose-history-detail",),
 ]

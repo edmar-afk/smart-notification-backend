@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import UserProfile, PatientDose, Patients
+from .models import UserProfile, PatientDose, Reminders, PatientDoseHistory
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -115,11 +115,35 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 
+
 class PatientDoseSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
 
     patient = serializers.PrimaryKeyRelatedField(
-        queryset=Patients.objects.select_related("user").all()
+        queryset=UserProfile.objects.select_related("user").all()
+    )
+
+    time = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
+    medicine_name = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+    details = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+    quantity = serializers.IntegerField(
+        required=True,
+        min_value=1,
     )
 
     class Meta:
@@ -133,8 +157,56 @@ class PatientDoseSerializer(serializers.ModelSerializer):
             "time",
             "status",
             "quantity",
+            "time_prescribe"
         ]
-        read_only_fields = ["id", "patient_name"]
+        read_only_fields = ["id", "patient_name", "time_prescribe"]
 
     def get_patient_name(self, obj):
-        return obj.patient.user.get_full_name() or obj.patient.user.username
+        return (
+            obj.patient.user.get_full_name()
+            or obj.patient.user.username
+        )
+
+
+
+class RemindersSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Reminders
+        fields = [
+            "id",
+            "notification_type",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_notification_type(self, value):
+        if value is not None:
+            value = value.strip()
+
+            if not value:
+                raise serializers.ValidationError(
+                    "Notification type cannot be empty."
+                )
+
+        return value
+
+
+
+class PatientDoseHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PatientDoseHistory
+        fields = [
+            "id",
+            "patient",
+            "medicine_name",
+            "status",
+            "time_taken",
+        ]
+        read_only_fields = ["id", "time_taken"]
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        validated_data["time_taken"] = timezone.localtime().strftime(
+            "%Y-%m-%d %I:%M:%S %p"
+        )
+        return super().create(validated_data)
