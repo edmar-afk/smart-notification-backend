@@ -13,7 +13,8 @@ from .serializers import (
     UserProfileSerializer, PatientDoseHistorySerializer,
     RegisterSerializer, PatientDoseSerializer, RemindersSerializer
 )
-
+from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
 
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -233,78 +234,95 @@ class PatientDoseListView(generics.ListAPIView):
         )
         
         
+User = get_user_model()
+
+
+
 class PatientDoseHistoryListCreateView(APIView):
     permission_classes = [AllowAny]
+
     """
-    GET: View all medicine history records.
-    POST: Save a new medicine history record.
+    GET: Retrieve medicine history for one Django user.
+    POST: Save medicine history for one Django user.
+
+    PatientDoseHistory.patient references django.contrib.auth.models.User.
+    Therefore, use patient_id=user_id, not patient__user_id.
     """
 
-    def get(self, request):
-        queryset = PatientDoseHistory.objects.select_related(
-            "patient"
+    def get(self, request, user_id):
+        print("========== DOSE HISTORY GET ==========")
+        print("Django User ID:", user_id)
+
+        get_object_or_404(User, pk=user_id)
+
+        queryset = PatientDoseHistory.objects.filter(
+            patient_id=user_id
         ).order_by("-id")
 
-        patient_id = request.query_params.get("patient_id")
-
-        if patient_id:
-            queryset = queryset.filter(patient_id=patient_id)
-
         serializer = PatientDoseHistorySerializer(
-            queryset, many=True
+            queryset,
+            many=True
         )
-        return Response(serializer.data)
 
-    def post(self, request):
-        serializer = PatientDoseHistorySerializer(data=request.data)
+        print("History records found:", len(serializer.data))
+        print("======================================")
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+        )
+
+    @transaction.atomic
+    def post(self, request, user_id):
+        print("========== DOSE HISTORY POST ==========")
+        print("Django User ID:", user_id)
+        print("Request data:", request.data)
+
+        user = get_object_or_404(User, pk=user_id)
+
+        payload = request.data.copy()
+
+        # Always assign the user from the URL.
+        # Do not trust a patient ID supplied by the client.
+        payload["patient"] = user.pk
+
+        serializer = PatientDoseHistorySerializer(data=payload)
 
         if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+
             return Response(
                 serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        patient_id = request.data.get("patient")
+        history = serializer.save(patient=user)
 
-        if not patient_id:
-            patient_id = request.data.get("patient_id")
-
-        if not patient_id:
-            return Response(
-                {"patient": ["A patient ID is required."]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            patient = UserProfile.objects.get(pk=patient_id)
-        except (UserProfile.DoesNotExist, ValueError, TypeError):
-            return Response(
-                {"patient": ["The specified patient does not exist."]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        history = serializer.save(patient=patient)
+        print("Saved history ID:", history.pk)
+        print("Saved Django User ID:", user.pk)
+        print("=======================================")
 
         return Response(
             PatientDoseHistorySerializer(history).data,
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_201_CREATED
         )
 
 
 class PatientDoseHistoryDetailView(APIView):
     permission_classes = [AllowAny]
-    """
-    GET: View history for one history-record ID.
-    """
 
-    def get(self, request, pk):
-        try:
-            history = PatientDoseHistory.objects.get(pk=pk)
-        except PatientDoseHistory.DoesNotExist:
-            return Response(
-                {"detail": "Medicine history record not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+    def get(self, request, user_id, pk):
+        get_object_or_404(User, pk=user_id)
+
+        history = get_object_or_404(
+            PatientDoseHistory,
+            pk=pk,
+            patient_id=user_id
+        )
 
         serializer = PatientDoseHistorySerializer(history)
-        return Response(serializer.data)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+        )

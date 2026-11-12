@@ -192,21 +192,10 @@ class RemindersSerializer(serializers.ModelSerializer):
 
 
 class PatientDoseHistorySerializer(serializers.ModelSerializer):
+    patient = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all()
+    )
+
     class Meta:
         model = PatientDoseHistory
-        fields = [
-            "id",
-            "patient",
-            "medicine_name",
-            "status",
-            "time_taken",
-        ]
-        read_only_fields = ["id", "time_taken"]
-
-    def create(self, validated_data):
-        from django.utils import timezone
-
-        validated_data["time_taken"] = timezone.localtime().strftime(
-            "%Y-%m-%d %I:%M:%S %p"
-        )
-        return super().create(validated_data)
+        fields = "__all__"

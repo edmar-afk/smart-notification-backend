@@ -97,7 +97,7 @@ class PatientDose(models.Model):
 
 class PatientDoseHistory(models.Model):
     patient = models.ForeignKey(
-        UserProfile,
+        User,
         on_delete=models.CASCADE,
         related_name="patient_dose_history",
         null=True,

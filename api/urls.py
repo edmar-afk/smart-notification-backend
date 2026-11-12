@@ -18,6 +18,14 @@ urlpatterns = [
     
     path("reminders/", views.StudentReminderView.as_view(),name="student-reminders",),
     
-    path("patient-dose-history/", views.PatientDoseHistoryListCreateView.as_view(), name="patient-dose-history-list-create",),
-    path("patient-dose-history/<int:pk>/", views.PatientDoseHistoryDetailView.as_view(), name="patient-dose-history-detail",),
+   path(
+    "patient-dose-history/<int:user_id>/",
+    views.PatientDoseHistoryListCreateView.as_view(),
+    name="patient-dose-history-list-create",
+),
+path(
+    "patient-dose-history/<int:user_id>/<int:pk>/",
+    views.PatientDoseHistoryDetailView.as_view(),
+    name="patient-dose-history-detail",
+),
 ]
