@@ -1,7 +1,5 @@
 
-from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -157,6 +155,35 @@ class PatientListView(generics.ListAPIView):
 
 
 # ============================================================
+# PERMANENT USER DELETE
+# ============================================================
+
+class PermanentUserDeleteView(APIView):
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        user = get_object_or_404(
+            User,
+            pk=pk,
+            is_superuser=False,
+            is_staff=False,
+        )
+
+        username = user.username
+
+        user.delete()
+
+        return Response(
+            {
+                "message": f"User {username} permanently deleted.",
+                "deleted": True,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+# ============================================================
 # PATIENT DOSE LIST AND CREATE
 # ============================================================
 
@@ -301,8 +328,7 @@ class PatientDoseListView(generics.ListAPIView):
 
 # ============================================================
 # OPTIONAL PATIENT DOSE VIEWSET
-# Use this if you have registered PatientDoseViewSet
-# with a DRF router.
+# Use this if registered with a DRF router.
 # ============================================================
 
 class PatientDoseViewSet(viewsets.ModelViewSet):
@@ -408,6 +434,33 @@ class StudentReminderView(generics.GenericAPIView):
             ),
             "reminder": serializer.data,
         })
+
+
+# ============================================================
+# ALL PATIENT DOSE HISTORY
+# Used by the admin dashboard.
+# ============================================================
+
+class AllPatientDoseHistoryListView(generics.ListAPIView):
+    serializer_class = PatientDoseHistorySerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = PatientDoseHistory.objects.select_related(
+            "patient"
+        ).order_by("-id")
+
+        is_deleted = self.request.query_params.get(
+            "is_deleted", "false"
+        )
+
+        if is_deleted == "true":
+            return queryset.filter(is_deleted=True)
+
+        elif is_deleted == "all":
+            return queryset
+
+        return queryset.filter(is_deleted=False)
 
 
 # ============================================================
@@ -553,3 +606,47 @@ class RestorePatientDoseHistoryView(APIView):
             "id": history.id,
             "is_deleted": False,
         }, status=status.HTTP_200_OK)
+
+
+
+class PermanentDeletePatientDoseView(APIView):
+    permission_classes = [AllowAny]
+
+    def delete(self, request, pk):
+        dose = get_object_or_404(
+            PatientDose,
+            pk=pk,
+            is_deleted=True
+        )
+
+        dose.delete()
+
+        return Response(
+            {
+                "message": "Patient dose record permanently deleted.",
+                "deleted": True
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class PermanentDeletePatientDoseHistoryView(APIView):
+    permission_classes = [AllowAny]
+
+    def delete(self, request, user_id, pk):
+        history = get_object_or_404(
+            PatientDoseHistory,
+            pk=pk,
+            patient_id=user_id,
+            is_deleted=True
+        )
+
+        history.delete()
+
+        return Response(
+            {
+                "message": "Patient dose history permanently deleted.",
+                "deleted": True
+            },
+            status=status.HTTP_200_OK
+        )

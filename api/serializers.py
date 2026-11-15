@@ -1,6 +1,7 @@
 
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.db import transaction
+
 from rest_framework import serializers
 
 from .models import (
@@ -9,6 +10,9 @@ from .models import (
     Reminders,
     PatientDoseHistory,
 )
+
+
+User = get_user_model()
 
 
 # ============================================================
@@ -107,7 +111,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         ]
 
     def validate_username(self, value):
-
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError(
                 "This username is already taken."
@@ -117,7 +120,6 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-
         profile_data = {
             "gender": validated_data.pop("gender", None),
             "course": validated_data.pop("course", None),
@@ -189,8 +191,6 @@ class PatientDoseSerializer(serializers.ModelSerializer):
             "status",
             "quantity",
             "time_prescribe",
-
-            # Soft delete fields
             "is_deleted",
             "deleted_at",
         ]
@@ -204,6 +204,8 @@ class PatientDoseSerializer(serializers.ModelSerializer):
         ]
 
     def get_patient_name(self, obj):
+        if not obj.patient or not obj.patient.user:
+            return "Unknown patient"
 
         return (
             obj.patient.user.get_full_name()
@@ -228,9 +230,7 @@ class RemindersSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
     def validate_notification_type(self, value):
-
         if value is not None:
-
             value = value.strip()
 
             if not value:
