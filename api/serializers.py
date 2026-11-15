@@ -3,22 +3,35 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import UserProfile, PatientDose, Reminders, PatientDoseHistory
+from .models import (
+    UserProfile,
+    PatientDose,
+    Reminders,
+    PatientDoseHistory,
+)
 
+
+# ============================================================
+# USER PROFILE SERIALIZER
+# ============================================================
 
 class UserProfileSerializer(serializers.ModelSerializer):
+
     username = serializers.CharField(
         source="user.username",
         read_only=True
     )
+
     email = serializers.EmailField(
         source="user.email",
         read_only=True
     )
+
     first_name = serializers.CharField(
         source="user.first_name",
         read_only=True
     )
+
     last_name = serializers.CharField(
         source="user.last_name",
         read_only=True
@@ -38,29 +51,39 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "year_level",
             "age",
         ]
+
         read_only_fields = ["id", "user"]
 
 
+# ============================================================
+# REGISTER SERIALIZER
+# ============================================================
+
 class RegisterSerializer(serializers.ModelSerializer):
+
     password = serializers.CharField(
         write_only=True,
         min_length=8
     )
+
     gender = serializers.CharField(
         required=False,
         allow_blank=True,
         allow_null=True
     )
+
     course = serializers.CharField(
         required=False,
         allow_blank=True,
         allow_null=True
     )
+
     year_level = serializers.CharField(
         required=False,
         allow_blank=True,
         allow_null=True
     )
+
     age = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -69,6 +92,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
+
         fields = [
             "id",
             "username",
@@ -83,14 +107,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         ]
 
     def validate_username(self, value):
+
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError(
                 "This username is already taken."
             )
+
         return value
 
     @transaction.atomic
     def create(self, validated_data):
+
         profile_data = {
             "gender": validated_data.pop("gender", None),
             "course": validated_data.pop("course", None),
@@ -113,14 +140,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
-
-
+# ============================================================
+# PATIENT DOSE SERIALIZER
+# ============================================================
 
 class PatientDoseSerializer(serializers.ModelSerializer):
+
     patient_name = serializers.SerializerMethodField()
 
     patient = serializers.PrimaryKeyRelatedField(
-        queryset=UserProfile.objects.select_related("user").all()
+        queryset=UserProfile.objects.select_related("user").all(),
+        required=False
     )
 
     time = serializers.CharField(
@@ -148,6 +178,7 @@ class PatientDoseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PatientDose
+
         fields = [
             "id",
             "patient",
@@ -157,29 +188,49 @@ class PatientDoseSerializer(serializers.ModelSerializer):
             "time",
             "status",
             "quantity",
-            "time_prescribe"
+            "time_prescribe",
+
+            # Soft delete fields
+            "is_deleted",
+            "deleted_at",
         ]
-        read_only_fields = ["id", "patient_name", "time_prescribe"]
+
+        read_only_fields = [
+            "id",
+            "patient_name",
+            "time_prescribe",
+            "is_deleted",
+            "deleted_at",
+        ]
 
     def get_patient_name(self, obj):
+
         return (
             obj.patient.user.get_full_name()
             or obj.patient.user.username
         )
 
 
+# ============================================================
+# REMINDERS SERIALIZER
+# ============================================================
 
 class RemindersSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Reminders
+
         fields = [
             "id",
             "notification_type",
         ]
+
         read_only_fields = ["id"]
 
     def validate_notification_type(self, value):
+
         if value is not None:
+
             value = value.strip()
 
             if not value:
@@ -190,12 +241,25 @@ class RemindersSerializer(serializers.ModelSerializer):
         return value
 
 
+# ============================================================
+# PATIENT DOSE HISTORY SERIALIZER
+# ============================================================
 
 class PatientDoseHistorySerializer(serializers.ModelSerializer):
+
     patient = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all()
+        queryset=User.objects.all(),
+        required=False,
+        allow_null=True
     )
 
     class Meta:
         model = PatientDoseHistory
+
         fields = "__all__"
+
+        read_only_fields = [
+            "id",
+            "is_deleted",
+            "deleted_at",
+        ]

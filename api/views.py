@@ -1,28 +1,46 @@
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
-from rest_framework import viewsets
-from rest_framework import generics, status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
-from django.db import transaction
-from .models import UserProfile, PatientDose, Reminders, PatientDoseHistory
-from .serializers import (
-    UserProfileSerializer, PatientDoseHistorySerializer,
-    RegisterSerializer, PatientDoseSerializer, RemindersSerializer
-)
-from django.contrib.auth import get_user_model
-from django.shortcuts import get_object_or_404
 
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework.exceptions import AuthenticationFailed
+
+from .models import (
+    UserProfile,
+    PatientDose,
+    Reminders,
+    PatientDoseHistory,
+)
+
+from .serializers import (
+    UserProfileSerializer,
+    PatientDoseHistorySerializer,
+    RegisterSerializer,
+    PatientDoseSerializer,
+    RemindersSerializer,
+)
 
 
+User = get_user_model()
+
+
+# ============================================================
+# JWT LOGIN
+# ============================================================
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+
     def validate(self, attrs):
         data = super().validate(attrs)
 
@@ -41,16 +59,23 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return data
 
 
-
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
+
+# ============================================================
+# REGISTRATION
+# ============================================================
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
 
+
+# ============================================================
+# LOGIN
+# ============================================================
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
@@ -79,7 +104,9 @@ class LoginView(APIView):
 
         token, created = Token.objects.get_or_create(user=user)
 
-        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
 
         return Response({
             "message": "Login successful.",
@@ -95,6 +122,10 @@ class LoginView(APIView):
         })
 
 
+# ============================================================
+# USER PROFILE
+# ============================================================
+
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
     permission_classes = [AllowAny]
@@ -106,48 +137,9 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return profile
 
 
-class PatientListView(generics.ListAPIView):
-    serializer_class = UserProfileSerializer
-    permission_classes = [AllowAny]
-
-    def get_queryset(self):
-        return UserProfile.objects.filter(
-            user__is_superuser=False,
-            user__is_staff=False,
-        ).select_related("user").order_by("id")
-        
-        
-
-
-class PatientDoseListCreateView(generics.ListCreateAPIView):
-    serializer_class = PatientDoseSerializer
-    permission_classes = [AllowAny]
-
-    def get_queryset(self):
-        queryset = PatientDose.objects.select_related(
-            "patient",
-            "patient__user",
-        ).order_by("-id")
-
-        patient_id = self.request.query_params.get("patient")
-
-        if patient_id:
-            queryset = queryset.filter(patient_id=patient_id)
-
-        return queryset
-
-
-
-
-class PatientDoseDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = PatientDose.objects.select_related(
-        "patient",
-        "patient__user",
-    ).all()
-    serializer_class = PatientDoseSerializer
-    permission_classes = [AllowAny]
-
-
+# ============================================================
+# PATIENT LIST
+# ============================================================
 
 class PatientListView(generics.ListAPIView):
     serializer_class = UserProfileSerializer
@@ -163,6 +155,214 @@ class PatientListView(generics.ListAPIView):
             .order_by("id")
         )
 
+
+# ============================================================
+# PATIENT DOSE LIST AND CREATE
+# ============================================================
+
+class PatientDoseListCreateView(generics.ListCreateAPIView):
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = PatientDose.objects.select_related(
+            "patient",
+            "patient__user",
+        ).order_by("-id")
+
+        is_deleted = self.request.query_params.get(
+            "is_deleted", "false"
+        )
+
+        if is_deleted == "true":
+            queryset = queryset.filter(is_deleted=True)
+
+        elif is_deleted == "all":
+            pass
+
+        else:
+            queryset = queryset.filter(is_deleted=False)
+
+        patient_id = self.request.query_params.get("patient")
+
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        user_id = self.request.data.get("user_id")
+
+        if not user_id:
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({
+                "user_id": "User ID is required."
+            })
+
+        user = get_object_or_404(User, pk=user_id)
+
+        profile, created = UserProfile.objects.get_or_create(
+            user=user
+        )
+
+        serializer.save(
+            patient=profile,
+            is_deleted=False,
+            deleted_at=None,
+        )
+
+
+# ============================================================
+# PATIENT DOSE DETAIL / SOFT DELETE
+# ============================================================
+
+class PatientDoseDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return PatientDose.objects.select_related(
+            "patient",
+            "patient__user",
+        ).filter(is_deleted=False)
+
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.deleted_at = timezone.now()
+
+        instance.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+
+# ============================================================
+# PATIENT DOSE RESTORE
+# ============================================================
+
+class RestorePatientDoseView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, pk):
+        dose = get_object_or_404(
+            PatientDose,
+            pk=pk,
+            is_deleted=True,
+        )
+
+        dose.is_deleted = False
+        dose.deleted_at = None
+
+        dose.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+        return Response({
+            "message": "Patient dose restored successfully.",
+            "id": dose.id,
+            "is_deleted": False,
+        }, status=status.HTTP_200_OK)
+
+
+# ============================================================
+# PATIENT DOSES BY USER
+# ============================================================
+
+class PatientDoseListView(generics.ListAPIView):
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        user_id = self.kwargs["user_id"]
+
+        queryset = (
+            PatientDose.objects
+            .select_related("patient", "patient__user")
+            .filter(patient__user_id=user_id)
+        )
+
+        is_deleted = self.request.query_params.get(
+            "is_deleted", "false"
+        )
+
+        if is_deleted == "true":
+            queryset = queryset.filter(is_deleted=True)
+
+        elif is_deleted == "all":
+            pass
+
+        else:
+            queryset = queryset.filter(is_deleted=False)
+
+        return queryset.order_by("-id")
+
+
+# ============================================================
+# OPTIONAL PATIENT DOSE VIEWSET
+# Use this if you have registered PatientDoseViewSet
+# with a DRF router.
+# ============================================================
+
+class PatientDoseViewSet(viewsets.ModelViewSet):
+    serializer_class = PatientDoseSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = PatientDose.objects.select_related(
+            "patient",
+            "patient__user",
+        )
+
+        if getattr(self, "action", None) == "restore":
+            return queryset.filter(is_deleted=True)
+
+        is_deleted = self.request.query_params.get(
+            "is_deleted", "false"
+        )
+
+        if is_deleted == "true":
+            return queryset.filter(is_deleted=True)
+
+        if is_deleted == "all":
+            return queryset.order_by("-id")
+
+        return queryset.filter(
+            is_deleted=False
+        ).order_by("-id")
+
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.deleted_at = timezone.now()
+
+        instance.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        dose = self.get_object()
+
+        dose.is_deleted = False
+        dose.deleted_at = None
+
+        dose.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+        return Response({
+            "message": "Patient dose restored successfully.",
+            "id": dose.id,
+            "is_deleted": False,
+        })
+
+
+# ============================================================
+# STUDENT REMINDERS
+# ============================================================
 
 class StudentReminderView(generics.GenericAPIView):
     serializer_class = RemindersSerializer
@@ -195,6 +395,7 @@ class StudentReminderView(generics.GenericAPIView):
             data=request.data,
             partial=reminder is not None,
         )
+
         serializer.is_valid(raise_exception=True)
 
         serializer.save(user=request.user)
@@ -209,63 +410,39 @@ class StudentReminderView(generics.GenericAPIView):
         })
 
 
-class PatientDoseViewSet(viewsets.ModelViewSet):
-    queryset = PatientDose.objects.select_related(
-        "patient",
-        "patient__user",
-    ).all().order_by("-id")
-
-    serializer_class = PatientDoseSerializer
-    permission_classes = [AllowAny]
-    
-    
-class PatientDoseListView(generics.ListAPIView):
-    serializer_class = PatientDoseSerializer
-    permission_classes = [AllowAny]
-
-    def get_queryset(self):
-        user_id = self.kwargs["user_id"]
-
-        return (
-            PatientDose.objects
-            .select_related("patient", "patient__user")
-            .filter(patient__user_id=user_id)
-            .order_by("-id")
-        )
-        
-        
-User = get_user_model()
-
-
+# ============================================================
+# PATIENT DOSE HISTORY LIST / CREATE
+# ============================================================
 
 class PatientDoseHistoryListCreateView(APIView):
     permission_classes = [AllowAny]
 
-    """
-    GET: Retrieve medicine history for one Django user.
-    POST: Save medicine history for one Django user.
-
-    PatientDoseHistory.patient references django.contrib.auth.models.User.
-    Therefore, use patient_id=user_id, not patient__user_id.
-    """
-
     def get(self, request, user_id):
-        print("========== DOSE HISTORY GET ==========")
-        print("Django User ID:", user_id)
-
         get_object_or_404(User, pk=user_id)
+
+        is_deleted = request.query_params.get(
+            "is_deleted", "false"
+        )
 
         queryset = PatientDoseHistory.objects.filter(
             patient_id=user_id
-        ).order_by("-id")
+        )
+
+        if is_deleted == "true":
+            queryset = queryset.filter(is_deleted=True)
+
+        elif is_deleted == "all":
+            pass
+
+        else:
+            queryset = queryset.filter(is_deleted=False)
+
+        queryset = queryset.order_by("-id")
 
         serializer = PatientDoseHistorySerializer(
             queryset,
             many=True
         )
-
-        print("History records found:", len(serializer.data))
-        print("======================================")
 
         return Response(
             serializer.data,
@@ -274,39 +451,32 @@ class PatientDoseHistoryListCreateView(APIView):
 
     @transaction.atomic
     def post(self, request, user_id):
-        print("========== DOSE HISTORY POST ==========")
-        print("Django User ID:", user_id)
-        print("Request data:", request.data)
-
         user = get_object_or_404(User, pk=user_id)
 
         payload = request.data.copy()
-
-        # Always assign the user from the URL.
-        # Do not trust a patient ID supplied by the client.
         payload["patient"] = user.pk
 
-        serializer = PatientDoseHistorySerializer(data=payload)
+        serializer = PatientDoseHistorySerializer(
+            data=payload
+        )
 
-        if not serializer.is_valid():
-            print("Serializer errors:", serializer.errors)
+        serializer.is_valid(raise_exception=True)
 
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        history = serializer.save(patient=user)
-
-        print("Saved history ID:", history.pk)
-        print("Saved Django User ID:", user.pk)
-        print("=======================================")
+        history = serializer.save(
+            patient=user,
+            is_deleted=False,
+            deleted_at=None,
+        )
 
         return Response(
             PatientDoseHistorySerializer(history).data,
             status=status.HTTP_201_CREATED
         )
 
+
+# ============================================================
+# PATIENT DOSE HISTORY DETAIL / SOFT DELETE
+# ============================================================
 
 class PatientDoseHistoryDetailView(APIView):
     permission_classes = [AllowAny]
@@ -317,7 +487,8 @@ class PatientDoseHistoryDetailView(APIView):
         history = get_object_or_404(
             PatientDoseHistory,
             pk=pk,
-            patient_id=user_id
+            patient_id=user_id,
+            is_deleted=False,
         )
 
         serializer = PatientDoseHistorySerializer(history)
@@ -326,3 +497,59 @@ class PatientDoseHistoryDetailView(APIView):
             serializer.data,
             status=status.HTTP_200_OK
         )
+
+    def delete(self, request, user_id, pk):
+        get_object_or_404(User, pk=user_id)
+
+        history = get_object_or_404(
+            PatientDoseHistory,
+            pk=pk,
+            patient_id=user_id,
+            is_deleted=False,
+        )
+
+        history.is_deleted = True
+        history.deleted_at = timezone.now()
+
+        history.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+        return Response({
+            "message": "Dose history moved to recycle bin.",
+            "id": history.id,
+            "is_deleted": True,
+        }, status=status.HTTP_200_OK)
+
+
+# ============================================================
+# PATIENT DOSE HISTORY RESTORE
+# ============================================================
+
+class RestorePatientDoseHistoryView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, user_id, pk):
+        get_object_or_404(User, pk=user_id)
+
+        history = get_object_or_404(
+            PatientDoseHistory,
+            pk=pk,
+            patient_id=user_id,
+            is_deleted=True,
+        )
+
+        history.is_deleted = False
+        history.deleted_at = None
+
+        history.save(update_fields=[
+            "is_deleted",
+            "deleted_at",
+        ])
+
+        return Response({
+            "message": "Dose history restored successfully.",
+            "id": history.id,
+            "is_deleted": False,
+        }, status=status.HTTP_200_OK)

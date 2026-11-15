@@ -1,7 +1,7 @@
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import FileExtensionValidator
-
 
 
 class UserProfile(models.Model):
@@ -10,9 +10,9 @@ class UserProfile(models.Model):
     course = models.TextField(blank=True, null=True)
     year_level = models.TextField(blank=True, null=True)
     age = models.TextField(blank=True, null=True)
+
     def __str__(self):
         return self.user.username
-    
 
 
 class Appointment(models.Model):
@@ -30,10 +30,10 @@ class Appointment(models.Model):
 class Patients(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     condition = models.TextField(blank=True, null=True)
-    
+
     def __str__(self):
         return self.user.first_name
-    
+
 
 class DoseSchedule(models.Model):
     STATUS_CHOICES = [
@@ -73,24 +73,30 @@ class DoseSchedule(models.Model):
         return f"{self.medication_name} for {self.user.username}"
 
 
-
 class PatientDose(models.Model):
     patient = models.ForeignKey(
         UserProfile,
         on_delete=models.CASCADE,
         related_name="patient_doses",
     )
+
     medicine_name = models.TextField(blank=True, null=True)
     details = models.TextField(blank=True, null=True)
     time = models.TextField(blank=True, null=True)
+
     status = models.CharField(
         max_length=20,
         choices=DoseSchedule.STATUS_CHOICES,
         default="Active",
     )
+
     quantity = models.PositiveIntegerField(blank=True, null=True)
     time_prescribe = models.DateTimeField(auto_now_add=True)
-    
+
+    # Soft-delete fields
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"Dose for {self.patient.user.first_name} at {self.time_prescribe}"
 
@@ -103,13 +109,17 @@ class PatientDoseHistory(models.Model):
         null=True,
         blank=True,
     )
+
     medicine_name = models.TextField(blank=True, null=True)
     status = models.TextField(blank=True, null=True)
     time_taken = models.TextField(blank=True, null=True)
-    
+
+    # Soft-delete fields
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"{self.medicine_name} - {self.status}"
-
 
 
 class Reminders(models.Model):
